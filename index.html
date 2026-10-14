@@ -4877,7 +4877,7 @@ const App = (() => {
     if (G && G.phase === 'over') gameOver();
   }
   /* ---------- modo servidor: salas en Cloudflare, con estado guardado y anfitrión elegido por el servidor ---------- */
-  const SRV_DEFAULT = 'https://hexaria-server.lenardoxabi.workers.dev';
+  const SRV_DEFAULT = 'https://hexaria-server.leonardoxabi.workers.dev';
   const srvUrl = () => { let u = ''; try { u = localStorage.getItem('hexaria.server') || ''; } catch (e) {} return (u || SRV_DEFAULT).replace(/\/+$/, ''); };
   const srvCfg = () => ({ players: cfg.players, mode: cfg.mode, difficulty: cfg.difficulty, vp: cfg.vp, theme: cfg.theme });
   async function srvCreate() {
