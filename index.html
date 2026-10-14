@@ -211,7 +211,7 @@ button.lord:hover{background:rgba(255,248,228,.75);border-color:var(--seal)}
 .rank div span:last-child{font:700 16px var(--num)}
 
 #toast{position:fixed;z-index:12;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 150px);transform:translate(-50%,10px);opacity:0;transition:opacity .25s,transform .25s;padding:9px 16px;pointer-events:none;max-width:calc(100% - 32px);text-align:center}
-#toast.show{opacity:1;transform:translate(-50%,0)}
+#toast.show{opacity:1;transform:translate(-50%,0);pointer-events:auto}
 
 #loading{position:fixed;inset:0;z-index:20;display:grid;place-items:center;background:radial-gradient(ellipse at 50% 40%,#3a2614,#120c07 70%);transition:opacity .7s}
 #loading.done{opacity:0;pointer-events:none}
@@ -4881,6 +4881,7 @@ const App = (() => {
   // Sala en curso recordada entre sesiones: código, asiento y nombre
   const netSaved = () => { try { const sv = JSON.parse(localStorage.getItem('hexaria.net') || 'null'); return sv && sv.mode === 'srv' && sv.code ? sv : null; } catch (e) { return null; } };
   const netForget = () => { try { localStorage.removeItem('hexaria.net'); } catch (e) {} };
+  const APP_VERSION = '43';
   const SRV_DEFAULT = 'https://hexaria-server.leonardoxabi.workers.dev';
   const srvUrl = () => { let u = ''; try { u = localStorage.getItem('hexaria.server') || ''; } catch (e) {} return (u || SRV_DEFAULT).replace(/\/+$/, ''); };
   const srvCfg = () => ({ players: cfg.players, mode: cfg.mode, difficulty: cfg.difficulty, vp: cfg.vp, theme: cfg.theme });
@@ -4972,7 +4973,18 @@ const App = (() => {
     addEventListener('appinstalled', () => { PWA.installed = true; PWA.prompt = null; toast('Hexaria instalada en este dispositivo'); if (menuView === 'main') showMenu('main'); });
     // El service worker solo puede registrarse si sw.js está junto a la página y se sirve por https; si no, el juego funciona igual
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
-      navigator.serviceWorker.register('./sw.js').then(r => { PWA.reg = r; }).catch(() => {});
+      navigator.serviceWorker.register('./sw.js').then(r => {
+        PWA.reg = r;
+        // Aviso de versión nueva: cuando el service worker nuevo queda instalado y ya había uno, se ofrece recargar
+        const watch = w => { if (!w) return; w.addEventListener('statechange', () => { if (w.state === 'installed' && navigator.serviceWorker.controller) toast('Hay una versión nueva de Hexaria. <button class="btn small" data-reload style="margin-left:8px">Actualizar</button>', 20000); }); };
+        watch(r.installing); r.addEventListener('updatefound', () => watch(r.installing));
+        if (r.waiting && navigator.serviceWorker.controller) toast('Hay una versión nueva de Hexaria. <button class="btn small" data-reload style="margin-left:8px">Actualizar</button>', 20000);
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) r.update().catch(() => {}); });
+        setInterval(() => r.update().catch(() => {}), 30 * 60 * 1000);
+      }).catch(() => {});
+      let swapped = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => { if (swapped) return; swapped = true; if (!G || (G.phase === 'over')) location.reload(); });
+      document.addEventListener('click', e => { if (e.target.closest('[data-reload]')) { const r = PWA.reg; if (r && r.waiting) r.waiting.postMessage('skip'); location.reload(); } });
     }
   }
   async function pwaInstall() {
@@ -5052,7 +5064,7 @@ const App = (() => {
           <button class="mitem" data-go="ach"><span class="crest">${View.iconSVG('ore')}</span><span><b>Logros</b><i>${readAch().size} de ${ACHIEVEMENTS.length} conseguidos</i></span><span class="chev">›</span></button>
           ${PWA.installed ? '' : `<button class="mitem" data-install><span class="crest">${View.iconSVG('wood')}</span><span><b>Instalar en el dispositivo</b><i>${PWA.prompt ? 'Como una aplicación, con icono propio' : 'Añadir a la pantalla de inicio'}</i></span><span class="chev">›</span></button>`}
         </nav>
-        <footer class="mfoot">Los ajustes se guardan en este dispositivo.</footer>`;
+        <footer class="mfoot">Los ajustes se guardan en este dispositivo.<br>Versión ${APP_VERSION}</footer>`;
     } else if (view === 'solo') {
       const vpHint = cfg.vp <= 7 ? 'Partida corta' : cfg.vp <= 10 ? 'Partida estándar' : 'Partida larga';
       m.innerHTML = `<button class="back" data-go="main">‹ Menú</button>

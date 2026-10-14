@@ -1,5 +1,5 @@
 /* Tierras de Hexaria: service worker. Guarda la página, el manifiesto, los iconos, las librerías y las fuentes para jugar sin conexión. */
-const VERSION = 'hexaria-v1';
+const VERSION = 'hexaria-v43';
 const SHELL = ['./', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 const CDN = ['cdn.jsdelivr.net', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
 self.addEventListener('install', e => {
@@ -26,6 +26,7 @@ self.addEventListener('fetch', e => {
     }));
   }
 });
+self.addEventListener('message', e => { if (e.data === 'skip') self.skipWaiting(); });
 // Al tocar la notificación de la partida se vuelve a la pestaña del juego
 self.addEventListener('notificationclick', e => {
   e.notification.close();
