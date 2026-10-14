@@ -311,6 +311,7 @@ body.in-menu #vignette{background:linear-gradient(90deg,rgba(14,8,3,.55),transpa
 .mitem .chev{margin-left:auto;font:400 26px var(--display);color:var(--seal)}
 .mitem[aria-disabled]{cursor:default}
 .soon{margin-left:auto;font:400 13px var(--display);color:var(--seal);border:2px solid var(--seal);padding:2px 7px 1px;border-radius:3px;transform:rotate(-6deg);opacity:.85;white-space:nowrap}
+.mlinks{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:18px}
 .mfoot{margin-top:auto;padding-top:24px;text-align:center;font:italic 400 14px var(--italic);color:var(--ink-2)}
 .back{align-self:flex-start;border:none;background:none;padding:4px 0;margin-bottom:14px;cursor:pointer;font:400 16px var(--display);color:var(--seal)}
 .back:hover{text-decoration:underline}
@@ -5025,20 +5026,33 @@ const App = (() => {
     const keep = !wasHidden && view === menuView ? m.scrollTop : 0;   // al cambiar una opción no se mueve la página
     const crest = i => View.armsSVG(i, defs[i].color);
     if (view === 'main') {
+      const themeName = { medieval: 'Medieval', future: 'Futurista', pompaelo: 'Pompaelo' }[cfg.theme] || '';
       m.innerHTML = `<header class="mhead"><span class="crest">${crest(0)}</span><h1>${Lx.title}</h1><p>${Lx.sub}</p></header>
         <div class="flourish"></div>
-        <div class="modepick"><div class="cap">Ambientación</div>
-          <div class="tabs ribbons">${[['medieval', 'Medieval'], ['future', 'Futurista'], ['pompaelo', 'Pompaelo']].map(([k, n]) => `<button class="btn small" data-theme="${k}" aria-pressed="${cfg.theme === k}">${n}</button>`).join('')}</div></div>
         <nav class="mnav">
           ${(() => { const sv = readSave(); return sv ? `<button class="mitem" data-go="load"><span class="crest">${View.armsSVG(0, defs[0].color)}</span><span><b>Cargar partida</b><i>Turno ${sv.G.turn || 1} · ${DIFF[sv.G.difficulty] ? DIFF[sv.G.difficulty][0] : ''} · guardada ${ago(sv.savedAt)}</i></span><span class="chev">›</span></button>` : ''; })()}
-          <button class="mitem" data-go="solo"><span class="crest">${crest(0)}</span><span><b>Partida individual</b><i>${Lx.soloItem}</i></span><span class="chev">›</span></button>
           ${(() => { const sv = netSaved(); return sv ? `<button class="mitem" data-srvback="${sv.code}"><span class="crest trio">${crest(1)}${crest(2)}</span><span><b>Volver a la partida en línea</b><i>Sala ${sv.code} · ${sv.name || 'tu asiento'} · ${ago(sv.at || Date.now())}</i></span><span class="chev">›</span></button>` : ''; })()}
+          <button class="mitem" data-go="solo"><span class="crest">${crest(0)}</span><span><b>Partida individual</b><i>${Lx.soloItem}</i></span><span class="chev">›</span></button>
           <button class="mitem" data-go="srv"><span class="crest trio">${crest(1)}${crest(2)}${crest(3)}</span><span><b>Multijugador</b><i>Partidas en línea con amigos, con un código</i></span><span class="chev">›</span></button>
+        </nav>
+        <div class="mlinks"><button class="btn small" data-go="settings">⚙ Ajustes · ${themeName}</button><button class="btn small" data-go="rules">Cómo se juega</button></div>
+        <footer class="mfoot">Colonización y comercio sobre una isla de hexágonos.<br>Cada mapa se genera al azar.</footer>`;
+    } else if (view === 'settings') {
+      m.innerHTML = `<button class="back" data-go="main">‹ Menú</button>
+        <h2>Ajustes</h2><p class="hint" style="text-align:left">La ambientación cambia el mundo entero: nombres, recursos, piezas y tablero. Se aplica a las partidas nuevas.</p>
+        <div class="opt-group"><div class="cap">Ambientación</div>
+          <div class="tabs ribbons">${[['medieval', 'Medieval'], ['future', 'Futurista'], ['pompaelo', 'Pompaelo']].map(([k, n]) => `<button class="btn small" data-theme="${k}" aria-pressed="${cfg.theme === k}">${n}</button>`).join('')}</div>
+          <p class="hint">${{ medieval: 'Un reino de hexágonos: madera, ladrillo, trigo, lana y mineral.', future: 'Hexaria Prime, una base lunar: grafeno, tierras raras, proteína, nanofibra y uranio.', pompaelo: 'Pamplona en 1423: los tres burgos y el Privilegio de la Unión.' }[cfg.theme]}</p></div>
+        <div class="opt-group"><div class="cap">Acercar la cámara a la cosecha</div>
+          <div class="tabs ribbons">${[['all', 'Siempre'], ['mine', 'Solo cuando cobro'], ['off', 'Nunca']].map(([v, l]) => `<button class="btn small" data-zoom="${v}" aria-pressed="${zoomPref === v}">${l}</button>`).join('')}</div></div>
+        <div class="opt-group"><div class="cap">Ritmo de los rivales</div>
+          <div class="tabs ribbons">${[['fast', 'Rápido'], ['normal', 'Normal'], ['slow', 'Pausado']].map(([v, l]) => `<button class="btn small" data-speed="${v}" aria-pressed="${botSpeed === v}">${l}</button>`).join('')}</div></div>
+        <nav class="mnav">
           <button class="mitem" data-go="rules"><span class="crest">${View.iconSVG('wheat')}</span><span><b>Cómo se juega</b><i>Reglas, costes y consejos</i></span><span class="chev">›</span></button>
           <button class="mitem" data-go="ach"><span class="crest">${View.iconSVG('ore')}</span><span><b>Logros</b><i>${readAch().size} de ${ACHIEVEMENTS.length} conseguidos</i></span><span class="chev">›</span></button>
           ${PWA.installed ? '' : `<button class="mitem" data-install><span class="crest">${View.iconSVG('wood')}</span><span><b>Instalar en el dispositivo</b><i>${PWA.prompt ? 'Como una aplicación, con icono propio' : 'Añadir a la pantalla de inicio'}</i></span><span class="chev">›</span></button>`}
         </nav>
-        <footer class="mfoot">Colonización y comercio sobre una isla de hexágonos.<br>Cada mapa se genera al azar.</footer>`;
+        <footer class="mfoot">Los ajustes se guardan en este dispositivo.</footer>`;
     } else if (view === 'solo') {
       const vpHint = cfg.vp <= 7 ? 'Partida corta' : cfg.vp <= 10 ? 'Partida estándar' : 'Partida larga';
       m.innerHTML = `<button class="back" data-go="main">‹ Menú</button>
@@ -5082,9 +5096,9 @@ const App = (() => {
         <div class="mcta"><button class="btn primary" data-load>Continuar partida</button>
         <button class="btn danger" data-del>${delArm ? '¿Seguro? Pulsa otra vez para borrar' : 'Borrar partida guardada'}</button></div>`;
     } else if (view === 'ach') {
-      m.innerHTML = `<button class="back" data-go="main">‹ Menú</button><h2>Logros</h2><p class="hint" style="text-align:left">${readAch().size} de ${ACHIEVEMENTS.length} conseguidos. Se guardan en este navegador.</p><div class="flourish"></div>${achListHTML()}`;
+      m.innerHTML = `<button class="back" data-go="settings">‹ Ajustes</button><h2>Logros</h2><p class="hint" style="text-align:left">${readAch().size} de ${ACHIEVEMENTS.length} conseguidos. Se guardan en este navegador.</p><div class="flourish"></div>${achListHTML()}`;
     } else if (view === 'rules') {
-      m.innerHTML = `<button class="back" data-go="main">‹ Menú</button><h2>Cómo se juega</h2><p class="hint" style="text-align:left">${Lx.rulesSub}</p><div class="flourish"></div>${rulesHTML()}
+      m.innerHTML = `<button class="back" data-go="${menuView === 'settings' ? 'settings' : 'main'}">‹ ${menuView === 'settings' ? 'Ajustes' : 'Menú'}</button><h2>Cómo se juega</h2><p class="hint" style="text-align:left">${Lx.rulesSub}</p><div class="flourish"></div>${rulesHTML()}
         <div class="flourish"></div><h2>Extensiones</h2>${Object.keys(Core.MODES).filter(k => k !== 'classic').map(k => `<div class="lbl2">${modeName(k)}</div><p class="hint" style="text-align:left">${MODE_INFO[k].short}</p><ul class="rules">${MODE_INFO[k].rules.map(r => `<li>${r}</li>`).join('')}</ul>`).join('')}`;
     } else if (view === 'p2p' || view === 'srv') {
       const srv = view === 'srv', hosting = NET.on && NET.host, joined = NET.on && !NET.host;
@@ -5135,6 +5149,8 @@ const App = (() => {
     if (d.go) { delArm = false; return showMenu(d.go); }
     if ('load' in d) { loadGame(); return; }
     if ('install' in d) { pwaInstall(); return; }
+    if (d.zoom) { zoomPref = d.zoom; try { localStorage.setItem('hexaria.zoom', zoomPref); } catch (e) {} return showMenu('settings'); }
+    if (d.speed) { botSpeed = d.speed; try { localStorage.setItem('hexaria.speed', botSpeed); } catch (e) {} return showMenu('settings'); }
     if (d.srvback) { if (menuView !== 'srv') showMenu('srv'); srvJoin(d.srvback); return; }
     if ('srvsave' in d) { const u = $('#srvUrl'); try { localStorage.setItem('hexaria.server', (u && u.value.trim()) || ''); } catch (e) {} toast('Dirección guardada'); return; }
     if ('nethost' in d && menuView === 'srv') { srvCreate(); return; }
