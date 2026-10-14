@@ -4593,7 +4593,7 @@ const App = (() => {
      ===================================================================== */
   let NET_SAVED_NAME = '';
   try { NET_SAVED_NAME = localStorage.getItem('hexaria.name') || ''; } catch (e) {}
-  const NET = { on: false, host: false, peer: null, conns: {}, hostConn: null, mySeat: 0, code: '', name: NET_SAVED_NAME, lobby: [], applying: false, next: null, asks: {}, askN: 0, origin: {}, status: '', startAck: {}, startMsg: null, startTimer: null, seated: false, lastMsg: 0, probe: 0, retries: 0, mode: 'p2p', ws: null };
+  const NET = { on: false, host: false, peer: null, conns: {}, hostConn: null, mySeat: 0, code: '', name: NET_SAVED_NAME, lobby: [], applying: false, next: null, asks: {}, askN: 0, origin: {}, status: '', startAck: {}, startMsg: null, startTimer: null, loopActive: false, seated: false, lastMsg: 0, probe: 0, retries: 0, mode: 'p2p', ws: null };
   const saveName = n => { NET.name = n; try { localStorage.setItem('hexaria.name', n); } catch (e) {} };
   const QR_LIB = 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js';
   const PEER_LIB = 'https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js';
@@ -4700,7 +4700,8 @@ const App = (() => {
   // Latido: el invitado envía un ping cada 4 s; si en 13 s no llega nada del anfitrión, sondea y, si sigue mudo, reabre el canal.
   // El anfitrión retira a quien lleve 25 s sin dar señales (su asiento lo juega la máquina hasta que vuelva)
   setInterval(() => {
-    if (!NET.on || !NET.peer) return;
+    if (NET.on && G && G.phase !== 'over' && !NET.loopActive && !NET.applying) { log('El turno se había quedado parado; se reanuda.', 'sys warn'); netLoop().catch(e => { if (e !== ABORT) { console.error(e); reportToLog(e); } }); }
+    if (!NET.on) return;
     const now = Date.now();
     if (NET.mode === 'srv') {
       const w = NET.ws; if (!w || w.readyState !== 1) return;
@@ -4708,6 +4709,7 @@ const App = (() => {
       if (now - (NET.lastMsg || now) > 13000) { if (!NET.probe) NET.probe = now; else if (now - NET.probe > 4500) { NET.probe = 0; NET.lastMsg = now; try { w.close(); } catch (e) {} } }
       return;
     }
+    if (!NET.peer) return;
     if (!NET.host) {
       const c = NET.hostConn; if (!c || !c.open) return;
       netSend(c, { t: 'ping' });
@@ -4795,6 +4797,7 @@ const App = (() => {
     NET.applying = true;
     try {
       G = Core.restore(msg.G);
+      if (G.players[HUMAN] && G.players[HUMAN].isBot && G.phase !== 'over') G.players[HUMAN].isBot = false;
       if (msg.note) log(msg.note, 'sys warn');
       if (msg.ev && msg.ev.length) await playEvents(msg.ev);
       if (msg.t === 'next') reconcilePieces();
@@ -4845,6 +4848,7 @@ const App = (() => {
     if (msg.theme !== cfg.theme) applyTheme(msg.theme);
     HUMAN = NET.mySeat;
     G = Core.restore(msg.G);
+    if (G.players[HUMAN] && G.players[HUMAN].isBot && G.phase !== 'over') { G.players[HUMAN].isBot = false; if (msg.resume) netEmit({ t: 'sync', G: snap(), ev: [], note: `${G.players[HUMAN].name} ha vuelto a la partida.` }); }
     $('#menu').hidden = true; document.body.classList.remove('in-menu'); View.setAttract(false);
     busy = false; endTurn = null; lastLongest = -1; lastArmy = -1; lastHarbor = -1; lastHand = null; lastVP = null;
     View.clearTargets(); closeModal(); setBanner(null);
@@ -4867,12 +4871,18 @@ const App = (() => {
       log('Conexión recuperada; la partida continúa.', 'sys');
     } finally { NET.applying = false; }
     if (NET.next) { const f = NET.next; NET.next = null; f(); }
-    else if (!G.players[HUMAN].isBot && netActor()) { /* era mi turno: el bucle sigue donde estaba */ }
+    else if (!NET.loopActive) netLoop().catch(e => { if (e !== ABORT) { console.error(e); reportToLog(e); } });
   }
   const waitNext = () => new Promise(r => { NET.next = r; });
   // Bucle de partida en red: solo actúa quien tiene el turno; los demás esperan el siguiente estado
   async function netLoop() {
+    if (NET.loopActive) return;
+    NET.loopActive = true;
+    try { await netLoopBody(); } finally { NET.loopActive = false; }
+  }
+  async function netLoopBody() {
     while (G && G.phase !== 'over') {
+      if (G.players[HUMAN] && G.players[HUMAN].isBot) { G.players[HUMAN].isBot = false; netEmit({ t: 'sync', G: snap(), ev: [] }); renderHUD(); }
       if (!netActor()) {
         const seat = G.phase === 'setup' ? G.setupOrder[G.setupIdx] : G.cur;
         setBanner(`${G.phase === 'setup' ? 'Colocación de' : 'Turno de'} ${who(seat)}…`); renderHUD(); hostNotify();
@@ -4914,7 +4924,7 @@ const App = (() => {
   // Sala en curso recordada entre sesiones: código, asiento y nombre
   const netSaved = () => { try { const sv = JSON.parse(localStorage.getItem('hexaria.net') || 'null'); return sv && sv.mode === 'srv' && sv.code ? sv : null; } catch (e) { return null; } };
   const netForget = () => { try { localStorage.removeItem('hexaria.net'); } catch (e) {} };
-  const APP_VERSION = '46';
+  const APP_VERSION = '47';
   const SRV_DEFAULT = 'https://hexaria-server.leonardoxabi.workers.dev';
   const srvUrl = () => { let u = ''; try { u = localStorage.getItem('hexaria.server') || ''; } catch (e) {} return (u || SRV_DEFAULT).replace(/\/+$/, ''); };
   const srvCfg = () => ({ players: cfg.players, mode: cfg.mode, difficulty: cfg.difficulty, vp: cfg.vp, theme: cfg.theme });
@@ -5164,7 +5174,7 @@ const App = (() => {
         ${hosting ? `<div class="opt-group"><div class="cap">Código de la partida</div><div class="code">${NET.code}</div><p class="hint">Compártelo con tus amigos. ${NET.status || 'Esperando a que se unan…'}</p>${srv ? `<div class="row" style="justify-content:center"><button class="btn small" data-share>Compartir enlace</button><button class="btn small" data-qr>Mostrar QR</button></div><div id="qrBox" hidden></div>` : ''}
           <p class="hint">${cfg.players} jugadores · ${modeName(cfg.mode)} · ${DIFF[cfg.difficulty][0]} · ${cfg.vp} puntos. Los asientos libres los juega la máquina.</p></div>${lobby}
           <p class="hint diag" id="netDiag">${netDiag()}</p>
-          <div class="mcta"><button class="btn primary" data-netstart ${NET.lobby.length > 1 ? '' : 'disabled'}>Comenzar partida</button><button class="btn" data-netleave>Cancelar</button></div>`
+          <div class="mcta"><button class="btn primary" data-netstart ${NET.lobby.length > 1 || srv ? '' : 'disabled'}>Comenzar partida</button><button class="btn" data-netleave>Cancelar</button></div>`
         : joined ? `<div class="opt-group"><div class="cap">Código</div><div class="code">${NET.code}</div><p class="hint">${NET.status || 'Conectado.'}</p>${srv ? `<div class="row" style="justify-content:center"><button class="btn small" data-share>Compartir enlace</button><button class="btn small" data-qr>Mostrar QR</button></div><div id="qrBox" hidden></div>` : ''}</div>${lobby}
           <p class="hint diag" id="netDiag">${netDiag()}</p>
           <div class="mcta"><button class="btn" data-netleave>Salir</button></div>`
