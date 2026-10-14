@@ -583,6 +583,8 @@ body.theme-future .mcard b{font-weight:600}
 .flabel .field{margin-top:4px;font-style:normal}
 .code{font:700 34px/1 var(--num);letter-spacing:.2em;text-align:center;color:var(--seal);padding:10px 0 4px}
 .diag{font-size:13px;opacity:.8}
+.qr{width:min(260px,70vw);margin:10px auto 4px;padding:10px;background:#fff;border-radius:6px;box-shadow:0 1px 3px rgba(40,20,5,.3)}
+.qr svg{display:block;width:100%;height:auto}
 .code-in{width:150px;font:700 20px var(--num);letter-spacing:.15em;text-align:center}
 body.theme-future .field{background:#fff;border-radius:8px}
 .modepick{margin:0 0 12px}
@@ -4593,6 +4595,7 @@ const App = (() => {
   try { NET_SAVED_NAME = localStorage.getItem('hexaria.name') || ''; } catch (e) {}
   const NET = { on: false, host: false, peer: null, conns: {}, hostConn: null, mySeat: 0, code: '', name: NET_SAVED_NAME, lobby: [], applying: false, next: null, asks: {}, askN: 0, origin: {}, status: '', startAck: {}, startMsg: null, startTimer: null, seated: false, lastMsg: 0, probe: 0, retries: 0, mode: 'p2p', ws: null };
   const saveName = n => { NET.name = n; try { localStorage.setItem('hexaria.name', n); } catch (e) {} };
+  const QR_LIB = 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js';
   const PEER_LIB = 'https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js';
   function netLoadLib() {
     if (window.Peer) return Promise.resolve();
@@ -4892,10 +4895,26 @@ const App = (() => {
     if (G && G.phase === 'over') gameOver();
   }
   /* ---------- modo servidor: salas en Cloudflare, con estado guardado y anfitrión elegido por el servidor ---------- */
+  // Enlace de invitación: abre el juego con el código puesto
+  const inviteUrl = () => location.href.replace(/[#?].*$/, '') + '?unirse=' + NET.code;
+  let pendingJoin = '';
+  async function shareInvite() {
+    const url = inviteUrl(), text = `Únete a mi partida de ${Lx.title}: código ${NET.code}`;
+    if (navigator.share) { try { await navigator.share({ title: Lx.title, text, url }); return; } catch (e) { if (e && e.name === 'AbortError') return; } }
+    try { await navigator.clipboard.writeText(url); toast('Enlace copiado al portapapeles'); } catch (e) { prompt('Copia el enlace:', url); }
+  }
+  function qrLoad() { if (window.qrcode) return Promise.resolve(); return new Promise((ok, ko) => { const sc = document.createElement('script'); sc.src = QR_LIB; sc.onload = ok; sc.onerror = () => ko(new Error('No se pudo cargar el generador de QR.')); document.head.appendChild(sc); }); }
+  async function showQR() {
+    const box = $('#qrBox'); if (!box) return;
+    if (!box.hidden) { box.hidden = true; return; }
+    box.hidden = false; box.innerHTML = '<p class="hint">Generando…</p>';
+    try { await qrLoad(); const qr = qrcode(0, 'M'); qr.addData(inviteUrl()); qr.make(); box.innerHTML = `<div class="qr">${qr.createSvgTag({ cellSize: 5, margin: 2, scalable: true })}</div><p class="hint">Escanéalo con la cámara del móvil: abre el juego con el código ${NET.code} ya puesto.</p>`; }
+    catch (e) { box.innerHTML = `<p class="hint">${e.message}</p>`; }
+  }
   // Sala en curso recordada entre sesiones: código, asiento y nombre
   const netSaved = () => { try { const sv = JSON.parse(localStorage.getItem('hexaria.net') || 'null'); return sv && sv.mode === 'srv' && sv.code ? sv : null; } catch (e) { return null; } };
   const netForget = () => { try { localStorage.removeItem('hexaria.net'); } catch (e) {} };
-  const APP_VERSION = '45';
+  const APP_VERSION = '46';
   const SRV_DEFAULT = 'https://hexaria-server.leonardoxabi.workers.dev';
   const srvUrl = () => { let u = ''; try { u = localStorage.getItem('hexaria.server') || ''; } catch (e) {} return (u || SRV_DEFAULT).replace(/\/+$/, ''); };
   const srvCfg = () => ({ players: cfg.players, mode: cfg.mode, difficulty: cfg.difficulty, vp: cfg.vp, theme: cfg.theme });
@@ -4907,7 +4926,7 @@ const App = (() => {
     catch (e) { netSetStatus('No se llega al servidor (' + srvUrl() + '). Comprueba la dirección o la conexión.'); NET.on = false; return; }
     srvOpen(code, { create: true });
   }
-  function srvJoin(code) { netLeave(); NET.on = true; NET.mode = 'srv'; const sv = netSaved(); if (sv && sv.code === code.toUpperCase().trim() && sv.name && !NET.name) NET.name = sv.name; srvOpen(code.toUpperCase().trim(), {}); }
+  function srvJoin(code) { pendingJoin = ''; netLeave(); NET.on = true; NET.mode = 'srv'; const sv = netSaved(); if (sv && sv.code === code.toUpperCase().trim() && sv.name && !NET.name) NET.name = sv.name; srvOpen(code.toUpperCase().trim(), {}); }
   // Abre (o reabre) el WebSocket con la sala. Con keep=true conserva asiento y partida (reconexión)
   function srvOpen(code, { create = false, keep = false } = {}) {
     NET.code = code; NET.name = NET.name || 'Invitado'; NET.host = keep ? NET.host : false;
@@ -4981,7 +5000,12 @@ const App = (() => {
       const here = location.href.replace(/[#?].*$/, '');
       const man = { name: 'Tierras de Hexaria', short_name: 'Hexaria', lang: 'es', description: 'Juego de mesa 3D de colonización y comercio.', start_url: here, scope: here.replace(/[^/]*$/, ''), id: here, display: 'standalone', orientation: 'any', background_color: '#0f2240', theme_color: '#8d2a1c',
         icons: [{ src: PWA_ICONS.i192, sizes: '192x192', type: 'image/png', purpose: 'any' }, { src: PWA_ICONS.i512, sizes: '512x512', type: 'image/png', purpose: 'any maskable' }] };
-      const link = document.createElement('link'); link.rel = 'manifest'; link.href = 'data:application/manifest+json,' + encodeURIComponent(JSON.stringify(man)); document.head.appendChild(link);
+      const link = document.createElement('link'); link.rel = 'manifest';
+      const dataHref = 'data:application/manifest+json,' + encodeURIComponent(JSON.stringify(man));
+      if (/^https?:$/.test(location.protocol)) {
+        // Si el manifiesto de verdad está junto a la página se usa ese (Chrome solo crea la app real a partir de un manifiesto servido por web)
+        fetch('manifest.webmanifest', { method: 'HEAD', cache: 'no-store' }).then(r => { link.href = r.ok ? 'manifest.webmanifest' : dataHref; document.head.appendChild(link); }).catch(() => { link.href = dataHref; document.head.appendChild(link); });
+      } else { link.href = dataHref; document.head.appendChild(link); }
     } catch (e) {}
     addEventListener('beforeinstallprompt', e => { e.preventDefault(); PWA.prompt = e; if (menuView === 'main') showMenu('main'); });
     addEventListener('appinstalled', () => { PWA.installed = true; PWA.prompt = null; toast('Hexaria instalada en este dispositivo'); if (menuView === 'main') showMenu('main'); });
@@ -5137,11 +5161,11 @@ const App = (() => {
         <h2>${srv ? 'Multijugador' : 'Entre amigos'}</h2><p class="hint" style="text-align:left">${srv ? 'Salas alojadas en el servidor: la partida se guarda, se puede volver a ella y si el anfitrión se va, otro jugador toma el relevo.' : 'Conexión directa entre navegadores (P2P). Prueba: el anfitrión crea un código y los demás se unen con él.'}</p>
         <div class="flourish"></div>
         ${NET.on ? `<div class="opt-group"><div class="cap">Tu nombre</div><div class="row" style="justify-content:center"><input class="field" id="netName" maxlength="14" placeholder="Cómo te verán los demás" value="${(NET.name || '').replace(/"/g, '&quot;')}" style="width:200px"><button class="btn" data-netrename>Cambiar</button></div></div>` : ''}
-        ${hosting ? `<div class="opt-group"><div class="cap">Código de la partida</div><div class="code">${NET.code}</div><p class="hint">Compártelo con tus amigos. ${NET.status || 'Esperando a que se unan…'}</p>
+        ${hosting ? `<div class="opt-group"><div class="cap">Código de la partida</div><div class="code">${NET.code}</div><p class="hint">Compártelo con tus amigos. ${NET.status || 'Esperando a que se unan…'}</p>${srv ? `<div class="row" style="justify-content:center"><button class="btn small" data-share>Compartir enlace</button><button class="btn small" data-qr>Mostrar QR</button></div><div id="qrBox" hidden></div>` : ''}
           <p class="hint">${cfg.players} jugadores · ${modeName(cfg.mode)} · ${DIFF[cfg.difficulty][0]} · ${cfg.vp} puntos. Los asientos libres los juega la máquina.</p></div>${lobby}
           <p class="hint diag" id="netDiag">${netDiag()}</p>
           <div class="mcta"><button class="btn primary" data-netstart ${NET.lobby.length > 1 ? '' : 'disabled'}>Comenzar partida</button><button class="btn" data-netleave>Cancelar</button></div>`
-        : joined ? `<div class="opt-group"><div class="cap">Código</div><div class="code">${NET.code}</div><p class="hint">${NET.status || 'Conectado.'}</p></div>${lobby}
+        : joined ? `<div class="opt-group"><div class="cap">Código</div><div class="code">${NET.code}</div><p class="hint">${NET.status || 'Conectado.'}</p>${srv ? `<div class="row" style="justify-content:center"><button class="btn small" data-share>Compartir enlace</button><button class="btn small" data-qr>Mostrar QR</button></div><div id="qrBox" hidden></div>` : ''}</div>${lobby}
           <p class="hint diag" id="netDiag">${netDiag()}</p>
           <div class="mcta"><button class="btn" data-netleave>Salir</button></div>`
         : `<div class="opt-group"><div class="cap">Crear partida</div><p class="hint">Se usarán los ajustes de la partida individual: ${cfg.players} jugadores, ${modeName(cfg.mode)}, ${DIFF[cfg.difficulty][0]}, ${cfg.vp} puntos.</p>
@@ -5149,7 +5173,7 @@ const App = (() => {
             <div class="row" style="justify-content:center"><button class="btn primary" data-nethost>Crear y obtener código</button></div></div>
           <div class="opt-group" style="border-bottom:none"><div class="cap">Unirse a una partida</div>
             <label class="flabel">Tu nombre<input class="field" id="netNameJoin" maxlength="14" placeholder="Cómo te verán los demás" value="${(NET.name || '').replace(/"/g, '&quot;')}"></label>
-            <label class="flabel">Código de la partida<div class="row" style="justify-content:flex-start;margin-top:4px"><input class="field code-in" id="netCode" maxlength="5" placeholder="CÓDIGO" style="text-transform:uppercase" value="${NET.code || ''}"><button class="btn primary" data-netjoin>Unirse</button></div></label>
+            <label class="flabel">Código de la partida<div class="row" style="justify-content:flex-start;margin-top:4px"><input class="field code-in" id="netCode" maxlength="5" placeholder="CÓDIGO" value="${pendingJoin}" style="text-transform:uppercase" value="${NET.code || ''}"><button class="btn primary" data-netjoin>Unirse</button></div></label>
             ${NET.status ? `<p class="hint">${NET.status}</p>` : ''}</div>
           ${srv ? `<details class="modeinfo"><summary>Dirección del servidor</summary><div class="row" style="justify-content:flex-start;margin-top:6px"><input class="field" id="srvUrl" value="${srvUrl().replace(/"/g, '&quot;')}" style="flex:1;min-width:0"><button class="btn small" data-srvsave>Guardar</button></div><p class="hint" style="text-align:left">Servidor propio en Cloudflare (plan gratuito). Déjalo como está salvo que uses otro.</p></details>
           <p class="hint" style="text-align:left">La sala se guarda en el servidor hasta 36 h sin actividad; cualquiera puede volver a entrar con el código y recupera su asiento. Si el anfitrión se va, el servidor nombra a otro jugador conectado.</p>` : `<p class="hint" style="text-align:left">Requisitos: internet para el apretón de manos (servidor público de PeerJS) y que la red permita WebRTC; si no hay camino directo se usa un relé público (más lento). Abre el juego desde la dirección web o la app instalada, no desde un visor incrustado. Si el anfitrión cierra la pestaña, la partida termina.</p>`}`}`;
@@ -5180,6 +5204,8 @@ const App = (() => {
     if ('install' in d) { pwaInstall(); return; }
     if (d.zoom) { zoomPref = d.zoom; try { localStorage.setItem('hexaria.zoom', zoomPref); } catch (e) {} return showMenu('settings'); }
     if (d.speed) { botSpeed = d.speed; try { localStorage.setItem('hexaria.speed', botSpeed); } catch (e) {} return showMenu('settings'); }
+    if ('share' in d) { shareInvite(); return; }
+    if ('qr' in d) { showQR(); return; }
     if (d.srvback) { if (menuView !== 'srv') showMenu('srv'); srvJoin(d.srvback); return; }
     if ('srvsave' in d) { const u = $('#srvUrl'); try { localStorage.setItem('hexaria.server', (u && u.value.trim()) || ''); } catch (e) {} toast('Dirección guardada'); return; }
     if ('nethost' in d && menuView === 'srv') { srvCreate(); return; }
@@ -5294,6 +5320,10 @@ const App = (() => {
       $('#menuSheet').addEventListener('click', onMenuClick);
       addEventListener('resize', () => { if (!$('#menu').hidden) View.setAttract(true, menuLayout()); });
       showMenu('main', true);
+      try {
+        const q = new URLSearchParams(location.search), code = (q.get('unirse') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5);
+        if (code.length === 5) { pendingJoin = code; history.replaceState(null, '', location.pathname); showMenu('srv'); if (NET.name) srvJoin(code); else toast('Escribe tu nombre y pulsa Unirse.', 4000); }
+      } catch (e) {}
       setTimeout(() => $('#loading').classList.add('done'), 150);
     } catch (e) {
       $('#loadMsg').innerHTML = `<span class="err">${e.message || 'Tu navegador no admite WebGL.'}</span>`;

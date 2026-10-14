@@ -3,6 +3,7 @@
   "short_name": "Hexaria",
   "description": "Juego de mesa 3D de colonización y comercio: medieval, lunar o Pompaelo.",
   "lang": "es",
+  "id": "./",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
