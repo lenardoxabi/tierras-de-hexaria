@@ -1,5 +1,5 @@
 /* Tierras de Hexaria: service worker. Guarda la página, el manifiesto, los iconos, las librerías y las fuentes para jugar sin conexión. */
-const VERSION = 'hexaria-v44';
+const VERSION = 'hexaria-v45';
 const SHELL = ['./', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 const CDN = ['cdn.jsdelivr.net', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
 self.addEventListener('install', e => {

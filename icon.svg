@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1d3a63"/><stop offset="1" stop-color="#0f2240"/></linearGradient>
+    <radialGradient id="glow" cx="50%" cy="38%" r="60%"><stop offset="0" stop-color="#3b6ea8" stop-opacity=".55"/><stop offset="1" stop-color="#0f2240" stop-opacity="0"/></radialGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f3d27a"/><stop offset=".5" stop-color="#d9a93f"/><stop offset="1" stop-color="#a7741f"/></linearGradient>
+    <linearGradient id="sea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3f9fc4"/><stop offset="1" stop-color="#1f6f94"/></linearGradient>
+    <linearGradient id="grass" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9ccb4e"/><stop offset="1" stop-color="#5f9a2d"/></linearGradient>
+    <linearGradient id="wheat" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f1cf5a"/><stop offset="1" stop-color="#c9992a"/></linearGradient>
+    <linearGradient id="forest" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4f8a3a"/><stop offset="1" stop-color="#2f5d23"/></linearGradient>
+    <linearGradient id="hill" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e2834f"/><stop offset="1" stop-color="#b3552b"/></linearGradient>
+    <linearGradient id="mount" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#b9b3ad"/><stop offset="1" stop-color="#7d746c"/></linearGradient>
+    <linearGradient id="wall" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f6eedd"/><stop offset="1" stop-color="#cdbfa3"/></linearGradient>
+    <linearGradient id="roof" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c8402c"/><stop offset="1" stop-color="#8d2a1c"/></linearGradient>
+    <clipPath id="rc"><rect width="512" height="512" rx="112"/></clipPath>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#000" flood-opacity=".45"/></filter>
+  </defs>
+  <g clip-path="url(#rc)">
+    <rect width="512" height="512" fill="url(#bg)"/>
+    <rect width="512" height="512" fill="url(#glow)"/>
+  </g>
+  <!-- isla de hexágonos sobre el mar, en perspectiva ligera -->
+  <g transform="translate(256 268) scale(1 .86)" filter="url(#sh)">
+    <!-- marco dorado hexagonal -->
+    <polygon points="0,-226 196,-113 196,113 0,226 -196,113 -196,-113" fill="url(#gold)"/>
+    <polygon points="0,-204 177,-102 177,102 0,204 -177,102 -177,-102" fill="url(#sea)"/>
+    <!-- siete hexágonos de tierra -->
+    <g id="h" transform="translate(0 0)">
+      <polygon points="0,-66 57,-33 57,33 0,66 -57,33 -57,-33" fill="url(#grass)" stroke="#2c4a1c" stroke-width="5" stroke-linejoin="round"/>
+    </g>
+    <g transform="translate(0 -116)"><polygon points="0,-66 57,-33 57,33 0,66 -57,33 -57,-33" fill="url(#forest)" stroke="#20401a" stroke-width="5" stroke-linejoin="round"/></g>
+    <g transform="translate(101 -58)"><polygon points="0,-66 57,-33 57,33 0,66 -57,33 -57,-33" fill="url(#wheat)" stroke="#7d5b12" stroke-width="5" stroke-linejoin="round"/></g>
+    <g transform="translate(101 58)"><polygon points="0,-66 57,-33 57,33 0,66 -57,33 -57,-33" fill="url(#hill)" stroke="#6e2f14" stroke-width="5" stroke-linejoin="round"/></g>
+    <g transform="translate(0 116)"><polygon points="0,-66 57,-33 57,33 0,66 -57,33 -57,-33" fill="url(#mount)" stroke="#4a4340" stroke-width="5" stroke-linejoin="round"/></g>
+    <g transform="translate(-101 58)"><polygon points="0,-66 57,-33 57,33 0,66 -57,33 -57,-33" fill="url(#wheat)" stroke="#7d5b12" stroke-width="5" stroke-linejoin="round"/></g>
+    <g transform="translate(-101 -58)"><polygon points="0,-66 57,-33 57,33 0,66 -57,33 -57,-33" fill="url(#forest)" stroke="#20401a" stroke-width="5" stroke-linejoin="round"/></g>
+  </g>
+  <!-- torreón central -->
+  <g transform="translate(256 276) scale(1.45)" filter="url(#sh)">
+    <rect x="-40" y="-30" width="80" height="78" rx="6" fill="url(#wall)" stroke="#6b5a40" stroke-width="5"/>
+    <g fill="url(#wall)" stroke="#6b5a40" stroke-width="5"><rect x="-44" y="-52" width="20" height="26" rx="3"/><rect x="-10" y="-52" width="20" height="26" rx="3"/><rect x="24" y="-52" width="20" height="26" rx="3"/></g>
+    <path d="M-16 48 V14 a16 16 0 0 1 32 0 V48 Z" fill="#3a1a10"/>
+    <rect x="-9" y="-16" width="18" height="18" rx="2" fill="#3a1a10"/>
+    <!-- bandera -->
+    <rect x="-3" y="-96" width="6" height="48" fill="#4a3220"/>
+    <path d="M3 -96 L44 -84 L3 -70 Z" fill="url(#roof)"/>
+  </g>
+</svg>
