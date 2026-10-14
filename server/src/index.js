@@ -72,6 +72,8 @@ export class Room {
     if (msg.t === 'ping') { this.send(ws, { t: 'pong' }); return; }
     if (msg.t === 'hello') {
       const name = String(msg.name || 'Invitado').slice(0, 14);
+      if (!this.data.exists && !msg.cfg) { this.send(ws, { t: 'full', reason: 'Esa sala no existe o ha caducado.' }); return; }
+      if (this.data.G && this.data.G.phase === 'over') { this.send(ws, { t: 'full', reason: 'Esa partida ya terminó.' }); return; }
       if (!this.data.exists) {                                        // primer jugador: crea la sala con sus ajustes
         this.data.exists = true; this.data.cfg = msg.cfg || { players: 4, mode: 'classic', difficulty: 'normal', vp: 10, theme: 'medieval' };
       }
