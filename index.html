@@ -4198,6 +4198,7 @@ const App = (() => {
     return `<div class="lbl2">Puntos por ronda</div>${chart}<div class="lbl2">Tiradas</div>${rolls}<div class="lbl2">Recursos cobrados</div>${gained}`;
   }
   function gameOver() {
+    try { sessionStorage.removeItem('hexaria.net'); } catch (e) {}
     if (NET.on && NET.host) hostNotifyClose();
     const rank = G.players.map(p => ({ p, pts: Core.points(G, p.id, true) })).sort((a, b) => b.pts - a.pts);
     const win = G.winner === HUMAN, fresh = win ? unlockAch(G) : [];
@@ -4575,7 +4576,7 @@ const App = (() => {
      ===================================================================== */
   let NET_SAVED_NAME = '';
   try { NET_SAVED_NAME = localStorage.getItem('hexaria.name') || ''; } catch (e) {}
-  const NET = { on: false, host: false, peer: null, conns: {}, hostConn: null, mySeat: 0, code: '', name: NET_SAVED_NAME, lobby: [], applying: false, next: null, asks: {}, askN: 0, origin: {}, status: '', startAck: {}, startMsg: null, startTimer: null, seated: false, lastMsg: 0, probe: 0, retries: 0 };
+  const NET = { on: false, host: false, peer: null, conns: {}, hostConn: null, mySeat: 0, code: '', name: NET_SAVED_NAME, lobby: [], applying: false, next: null, asks: {}, askN: 0, origin: {}, status: '', startAck: {}, startMsg: null, startTimer: null, seated: false, lastMsg: 0, probe: 0, retries: 0, mode: 'p2p', ws: null };
   const saveName = n => { NET.name = n; try { localStorage.setItem('hexaria.name', n); } catch (e) {} };
   const PEER_LIB = 'https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js';
   function netLoadLib() {
@@ -4607,14 +4608,15 @@ const App = (() => {
     const seat = G.phase === 'setup' ? G.setupOrder[G.setupIdx] : G.cur;
     return isLocalSeat(seat) || (G.players[seat].isBot && NET.host);
   }
-  function netSetStatus(t) { NET.status = t; if (menuView === 'p2p') showMenu('p2p'); }
+  const isNetView = () => menuView === 'p2p' || menuView === 'srv';
+  function netSetStatus(t) { NET.status = t; if (isNetView()) showMenu(menuView); }
   function netLeave() {
-    try { sessionStorage.removeItem('hexaria.net'); } catch (e) {}
+    if (NET.ws) { const w = NET.ws; NET.ws = null; try { if (w.readyState === 1) w.send(JSON.stringify({ t: 'leave' })); w.close(); } catch (e) {} }
     clearTimeout(netTimer);
     if (NET.host) hostNotifyClose();
     if (NET.peer) { try { NET.peer.destroy(); } catch (e) {} }
     clearInterval(NET.startTimer); NET.startAck = {}; NET.startMsg = null;
-    Object.assign(NET, { on: false, host: false, peer: null, conns: {}, hostConn: null, mySeat: 0, code: '', lobby: [], applying: false, next: null, asks: {}, origin: {}, status: '', seated: false, lastMsg: 0, probe: 0, retries: 0 });
+    Object.assign(NET, { on: false, host: false, peer: null, conns: {}, hostConn: null, mySeat: 0, code: '', lobby: [], applying: false, next: null, asks: {}, origin: {}, status: '', seated: false, lastMsg: 0, probe: 0, retries: 0, mode: 'p2p', ws: null });
   }
   async function netHost() {
     await netLoadLib();
@@ -4665,6 +4667,7 @@ const App = (() => {
   }
   // Diagnóstico visible en la sala: estado del servidor de señalización, del canal y del tipo de ruta
   function netDiag() {
+    if (NET.on && NET.mode === 'srv') { const w = NET.ws, st = !w ? 'sin conexión' : ['conectando…', 'conectado', 'cerrando', 'cerrado'][w.readyState]; const age = NET.lastMsg ? Math.round((Date.now() - NET.lastMsg) / 1000) : null; return `Servidor: ${st}${age !== null ? ' · último mensaje hace ' + age + ' s' : ''}${NET.host ? ' · haces de anfitrión' : ''}`; }
     if (!NET.on || !NET.peer) return '';
     const p = NET.peer, sig = p.destroyed ? 'cerrado' : p.disconnected ? 'sin enlace' : p.open ? 'conectado' : 'conectando…';
     const route = c => { try { const pc = c.peerConnection; if (!pc) return ''; const st = pc.iceConnectionState; return st ? ' · ruta ' + st : ''; } catch (e) { return ''; } };
@@ -4681,6 +4684,12 @@ const App = (() => {
   setInterval(() => {
     if (!NET.on || !NET.peer) return;
     const now = Date.now();
+    if (NET.mode === 'srv') {
+      const w = NET.ws; if (!w || w.readyState !== 1) return;
+      try { w.send(JSON.stringify({ t: 'ping' })); } catch (e) {}
+      if (now - (NET.lastMsg || now) > 13000) { if (!NET.probe) NET.probe = now; else if (now - NET.probe > 4500) { NET.probe = 0; NET.lastMsg = now; try { w.close(); } catch (e) {} } }
+      return;
+    }
     if (!NET.host) {
       const c = NET.hostConn; if (!c || !c.open) return;
       netSend(c, { t: 'ping' });
@@ -4692,7 +4701,7 @@ const App = (() => {
       Object.entries(NET.conns).forEach(([id, c]) => { if (c._last && now - c._last > 25000) { try { c.close(); } catch (e) {} netDrop(id); } });
     }
   }, 4000);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden && NET.on && !NET.host && NET.hostConn && NET.hostConn.open) { NET.probe = Date.now(); netSend(NET.hostConn, { t: 'ping' }); } });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && NET.on && NET.mode === 'srv' && NET.ws && NET.ws.readyState === 1) { NET.probe = Date.now(); try { NET.ws.send(JSON.stringify({ t: 'ping' })); } catch (e) {} return; } if (!document.hidden && NET.on && !NET.host && NET.hostConn && NET.hostConn.open) { NET.probe = Date.now(); netSend(NET.hostConn, { t: 'ping' }); } });
   function netDrop(peerId) {
     delete NET.conns[peerId];
     const l = NET.lobby.find(x => x.peerId === peerId); if (!l) return;
@@ -4704,10 +4713,11 @@ const App = (() => {
     } else { NET.lobby = NET.lobby.filter(x => x.peerId !== peerId); netSendLobby(); }
   }
   function netRename(name) {
+    if (NET.mode === 'srv') { NET.name = name; if (NET.ws && NET.ws.readyState === 1) NET.ws.send(JSON.stringify({ t: 'rename', name })); return; }
     if (NET.host) { const me = NET.lobby.find(x => x.seat === 0); if (me) me.name = name; netSendLobby(); }
     else netEmit({ t: 'rename', name });
   }
-  function netSendLobby() { const msg = { t: 'lobby', players: NET.lobby.map(x => ({ name: x.name, seat: x.seat })), cfg: { players: cfg.players, mode: cfg.mode, difficulty: cfg.difficulty, vp: cfg.vp, theme: cfg.theme } }; netBroadcast(msg); if (menuView === 'p2p') showMenu('p2p'); hostNotify(); }
+  function netSendLobby() { const msg = { t: 'lobby', players: NET.lobby.map(x => ({ name: x.name, seat: x.seat })), cfg: { players: cfg.players, mode: cfg.mode, difficulty: cfg.difficulty, vp: cfg.vp, theme: cfg.theme } }; netBroadcast(msg); if (isNetView()) showMenu(menuView); hostNotify(); }
   async function netHandle(msg, conn) {
     try {
       if (NET.host) {
@@ -4744,7 +4754,7 @@ const App = (() => {
         if (msg.t === 'full') { netSetStatus('La partida está completa.'); return; }
         if (msg.t === 'pong') return;
         if (msg.t === 'seat') { NET.mySeat = msg.seat; NET.seated = true; NET.retries = 0; try { sessionStorage.setItem('hexaria.net', JSON.stringify({ code: NET.code, seat: msg.seat })); } catch (e) {} return; }
-        if (msg.t === 'lobby') { NET.lobby = msg.players.map(p => ({ ...p, peerId: p.seat === NET.mySeat ? 'me' : 'x' })); const me = NET.lobby.find(x => x.seat === NET.mySeat); if (me) NET.name = me.name; Object.assign(cfg, msg.cfg); if (menuView === 'p2p') showMenu('p2p'); return; }
+        if (msg.t === 'lobby') { NET.lobby = msg.players.map(p => ({ ...p, peerId: p.seat === NET.mySeat ? 'me' : 'x' })); const me = NET.lobby.find(x => x.seat === NET.mySeat); if (me) NET.name = me.name; Object.assign(cfg, msg.cfg); if (isNetView()) showMenu(menuView); return; }
         if (msg.t === 'start') { netSend(conn, { t: 'startack' }); if (!G) startNetGame(msg); else if (msg.resume) netResume(msg); return; }
         if (msg.t === 'sync' || msg.t === 'next') { netQueue(msg); return; }
         if (msg.t === 'ask') { const result = await netAnswer(msg); netSend(conn, { t: 'reply', id: msg.id, result }); return; }
@@ -4805,7 +4815,7 @@ const App = (() => {
     const msg = { t: 'start', G: snap(), theme: cfg.theme, names: G.players.map(p => p.name) };
     NET.startAck = {}; NET.startMsg = msg; let tries = 0;
     clearInterval(NET.startTimer);
-    NET.startTimer = setInterval(() => {
+    if (NET.mode !== 'srv') NET.startTimer = setInterval(() => {
       const pending = Object.keys(NET.conns).filter(id => !NET.startAck[id]);
       if (!pending.length || !NET.on || ++tries > 6) { clearInterval(NET.startTimer); if (pending.length && NET.on) log('No todos los invitados confirmaron el inicio; si alguno no ve la partida, que vuelva a unirse con el código.', 'sys warn'); return; }
       pending.forEach(id => netSend(NET.conns[id], NET.startMsg));
@@ -4833,6 +4843,7 @@ const App = (() => {
       if (msg.theme !== cfg.theme) applyTheme(msg.theme);
       HUMAN = NET.mySeat;
       G = Core.restore(msg.G);
+      if (G.players[HUMAN] && G.players[HUMAN].isBot && G.phase !== 'over') { G.players[HUMAN].isBot = false; if (NET.host) netEmit({ t: 'sync', G: snap(), ev: [], note: `${G.players[HUMAN].name} ha vuelto a la partida.` }); }
       View.clearTargets(); closeModal(); setBanner(null); busy = false;
       View.buildBoard(G.board, G.players); reconcilePieces(); renderHUD();
       log('Conexión recuperada; la partida continúa.', 'sys');
@@ -4864,6 +4875,83 @@ const App = (() => {
       renderHUD(); hostNotify();
     }
     if (G && G.phase === 'over') gameOver();
+  }
+  /* ---------- modo servidor: salas en Cloudflare, con estado guardado y anfitrión elegido por el servidor ---------- */
+  const SRV_DEFAULT = 'https://hexaria-server.lenardoxabi.workers.dev';
+  const srvUrl = () => { let u = ''; try { u = localStorage.getItem('hexaria.server') || ''; } catch (e) {} return (u || SRV_DEFAULT).replace(/\/+$/, ''); };
+  const srvCfg = () => ({ players: cfg.players, mode: cfg.mode, difficulty: cfg.difficulty, vp: cfg.vp, theme: cfg.theme });
+  async function srvCreate() {
+    const nm = $('#netNameHost'); saveName((nm && nm.value.trim()) || 'Anfitrión');
+    netLeave(); NET.on = true; NET.mode = 'srv'; netSetStatus('Pidiendo una sala al servidor…');
+    let code;
+    try { const r = await fetch(srvUrl() + '/new', { cache: 'no-store' }); const j = await r.json(); code = j.code; if (!code) throw new Error(j.error || 'sin código'); }
+    catch (e) { netSetStatus('No se llega al servidor (' + srvUrl() + '). Comprueba la dirección o la conexión.'); NET.on = false; return; }
+    srvOpen(code, { create: true });
+  }
+  function srvJoin(code) { netLeave(); NET.on = true; NET.mode = 'srv'; srvOpen(code.toUpperCase().trim(), {}); }
+  // Abre (o reabre) el WebSocket con la sala. Con keep=true conserva asiento y partida (reconexión)
+  function srvOpen(code, { create = false, keep = false } = {}) {
+    NET.code = code; NET.name = NET.name || 'Invitado'; NET.host = keep ? NET.host : false;
+    if (!keep) { try { const sv = JSON.parse(sessionStorage.getItem('hexaria.net') || 'null'); if (sv && sv.code === code && sv.mode === 'srv') { NET.seated = true; NET.mySeat = sv.seat; } } catch (e) {} }
+    if (NET.ws) { const w = NET.ws; NET.ws = null; try { w.onclose = null; w.close(); } catch (e) {} }
+    if (!G) netSetStatus(keep ? 'Reconectando con la sala ' + code + '…' : 'Conectando con la sala ' + code + '…'); else toast('Reconectando con el servidor…');
+    let ws;
+    try { ws = new WebSocket(srvUrl().replace(/^http/, 'ws') + '/r/' + code); } catch (e) { netSetStatus('Dirección del servidor no válida.'); return; }
+    NET.ws = ws;
+    const srv = { peer: 'server', get open() { return ws.readyState === 1; }, send: m => { if (ws.readyState === 1) ws.send(JSON.stringify(m)); }, close: () => { try { ws.close(); } catch (e) {} } };
+    NET.hostConn = srv; NET.conns = { server: srv }; NET.probe = 0;
+    netWatch(12000, 'El servidor no responde. Comprueba la conexión o la dirección del servidor.');
+    ws.onopen = () => { clearTimeout(netTimer); NET.lastMsg = Date.now(); srv.send({ t: 'hello', name: NET.name, seat: NET.seated ? NET.mySeat : undefined, cfg: create ? srvCfg() : undefined }); };
+    ws.onmessage = e => { NET.lastMsg = Date.now(); NET.probe = 0; let m; try { m = JSON.parse(e.data); } catch (x) { return; } srvHandle(m, srv).catch(err => { console.error(err); reportToLog(err); }); };
+    ws.onerror = () => {};
+    ws.onclose = e => {
+      if (!NET.on || NET.ws !== ws) return;
+      clearTimeout(netTimer);
+      if (e.code === 4000) { toast('Has entrado en la sala desde otro sitio; esta sesión se cierra.', 4000); netLeave(); showMenu(G ? 'main' : 'srv', !!G); return; }
+      NET.retries = (NET.retries || 0) + 1;
+      if (NET.retries <= 8) { if (!G) netSetStatus('Conexión perdida; reconectando…'); setTimeout(() => { if (NET.on && NET.ws === ws) srvOpen(NET.code, { keep: true }); }, 1500 * Math.min(NET.retries, 4)); return; }
+      toast('No se pudo reconectar con el servidor.', 4000); netLeave(); if (G) showMenu('main', true); else showMenu('srv');
+    };
+  }
+  // Un asiento humano se queda sin jugador (lo lleva la máquina hasta que vuelva) o vuelve a ocuparse
+  function seatToBot(seat, name) {
+    if (!G || G.phase === 'over' || !NET.host) return;
+    if (G.players[seat].isBot) return;
+    G.players[seat].isBot = true; log(`${who(seat)} se ha desconectado; a partir de ahora juega la máquina por él.`, 'sys warn');
+    netEmit({ t: 'sync', G: snap(), ev: [], note: `${G.players[seat].name} se ha desconectado; juega la máquina por él.` });
+    if (NET.next && netActor()) { const f = NET.next; NET.next = null; f(); }
+  }
+  function seatBack(seat, name) {
+    if (!G || !NET.host || !G.players[seat].isBot) return;
+    G.players[seat].isBot = false; if (name) G.players[seat].name = name;
+    log(`${who(seat)} ha vuelto a la partida.`, 'sys');
+    netEmit({ t: 'sync', G: snap(), ev: [], note: `${G.players[seat].name} ha vuelto a la partida.` });
+  }
+  async function srvHandle(msg, srv) {
+    if (msg.t === 'pong') return;
+    if (msg.t === 'full') { netSetStatus(msg.reason || 'La sala está completa.'); return; }
+    if (msg.t === 'seat') { NET.mySeat = msg.seat; NET.seated = true; NET.retries = 0; try { sessionStorage.setItem('hexaria.net', JSON.stringify({ code: NET.code, seat: msg.seat, mode: 'srv' })); } catch (e) {} if (!G) netSetStatus('En la sala. Esperando a que empiece la partida…'); return; }
+    if (msg.t === 'lobby') {
+      NET.lobby = msg.players.map(p => ({ ...p, peerId: p.seat === NET.mySeat ? 'me' : 'server' }));
+      const me = NET.lobby.find(x => x.seat === NET.mySeat); if (me) NET.name = me.name;
+      if (msg.cfg && !NET.host) Object.assign(cfg, msg.cfg);
+      if (isNetView()) showMenu(menuView); return;
+    }
+    if (msg.t === 'host') {
+      const was = NET.host; NET.host = msg.seat === NET.mySeat;
+      if (NET.host !== was) {
+        if (NET.host) { hostNotify(); if (!G) netSetStatus(''); if (G && G.phase !== 'over') { log('Ahora haces de anfitrión: la máquina juega desde tu dispositivo.', 'sys'); if (NET.next && netActor()) { const f = NET.next; NET.next = null; f(); } } }
+        else hostNotifyClose();
+        if (isNetView()) showMenu(menuView);
+      }
+      return;
+    }
+    if (msg.t === 'start') { if (!G) startNetGame(msg); else if (msg.resume) netResume(msg); return; }
+    if (msg.t === 'sync' || msg.t === 'next') { netQueue(msg); return; }
+    if (msg.t === 'ask') { if (!isLocalSeat(msg.to)) return; const result = await netAnswer(msg); srv.send({ t: 'reply', id: msg.id, result }); return; }
+    if (msg.t === 'reply') { netResolve(msg); return; }
+    if (msg.t === 'left') { seatToBot(msg.seat, msg.name); return; }
+    if (msg.t === 'back') { seatBack(msg.seat, msg.name); return; }
   }
   /* ---------- PWA: instalación, trabajo sin conexión y aviso del anfitrión ---------- */
   const PWA = { prompt: null, reg: null, installed: matchMedia('(display-mode: standalone)').matches || navigator.standalone === true, notif: null };
@@ -4994,11 +5082,12 @@ const App = (() => {
     } else if (view === 'rules') {
       m.innerHTML = `<button class="back" data-go="main">‹ Menú</button><h2>Cómo se juega</h2><p class="hint" style="text-align:left">${Lx.rulesSub}</p><div class="flourish"></div>${rulesHTML()}
         <div class="flourish"></div><h2>Extensiones</h2>${Object.keys(Core.MODES).filter(k => k !== 'classic').map(k => `<div class="lbl2">${modeName(k)}</div><p class="hint" style="text-align:left">${MODE_INFO[k].short}</p><ul class="rules">${MODE_INFO[k].rules.map(r => `<li>${r}</li>`).join('')}</ul>`).join('')}`;
-    } else if (view === 'p2p') {
-      const hosting = NET.on && NET.host, joined = NET.on && !NET.host;
-      const lobby = NET.lobby.length ? `<div class="lbl2">Jugadores</div><ol class="standings">${NET.lobby.map(l => `<li><span class="pos">${l.seat + 1}</span>${View.armsSVG(l.seat, Core.PLAYER_DEFS[l.seat].color)}<span><b style="color:${TEXT_COL[l.seat]}">${l.name}</b><i>${l.seat === 0 ? 'anfitrión' : 'invitado'}${l.seat === NET.mySeat ? ' · tú' : ''}</i></span></li>`).join('')}${Array.from({ length: Math.max(0, cfg.players - NET.lobby.length) }, (_, i) => `<li><span class="pos">${NET.lobby.length + i + 1}</span><span><b>Máquina</b><i>asiento libre</i></span></li>`).join('')}</ol>` : '';
+    } else if (view === 'p2p' || view === 'srv') {
+      const srv = view === 'srv', hosting = NET.on && NET.host, joined = NET.on && !NET.host;
+      const lobby = NET.lobby.length ? `<div class="lbl2">Jugadores</div><ol class="standings">${NET.lobby.map(l => `<li><span class="pos">${l.seat + 1}</span>${View.armsSVG(l.seat, Core.PLAYER_DEFS[l.seat].color)}<span><b style="color:${TEXT_COL[l.seat]}">${l.name}</b><i>${srv ? (l.seat === (NET.lobby.find(x => x.online !== false) || {}).seat && NET.on ? 'anfitrión' : 'jugador') : (l.seat === 0 ? 'anfitrión' : 'invitado')}${l.seat === NET.mySeat ? ' · tú' : ''}${l.online === false ? ' · desconectado' : ''}</i></span></li>`).join('')}${Array.from({ length: Math.max(0, cfg.players - NET.lobby.length) }, (_, i) => `<li><span class="pos">${NET.lobby.length + i + 1}</span><span><b>Máquina</b><i>asiento libre</i></span></li>`).join('')}</ol>` : '';
       m.innerHTML = `<button class="back" data-go="multi">‹ Multijugador</button>
-        <h2>Entre amigos</h2><p class="hint" style="text-align:left">Conexión directa entre navegadores (P2P). Prueba: el anfitrión crea un código y los demás se unen con él.</p>
+        ${(() => { if (!srv || NET.on) return ''; try { const sv = JSON.parse(sessionStorage.getItem('hexaria.net') || 'null'); return sv && sv.mode === 'srv' ? `<div class="opt-group"><p class="hint">Tenías una partida en la sala <b>${sv.code}</b>.</p><div class="row" style="justify-content:center"><button class="btn primary" data-srvback="${sv.code}">Volver a la partida</button></div></div>` : ''; } catch (e) { return ''; } })()}
+        <h2>${srv ? 'Servidor' : 'Entre amigos'}</h2><p class="hint" style="text-align:left">${srv ? 'Salas alojadas en el servidor: la partida se guarda, se puede volver a ella y si el anfitrión se va, otro jugador toma el relevo.' : 'Conexión directa entre navegadores (P2P). Prueba: el anfitrión crea un código y los demás se unen con él.'}</p>
         <div class="flourish"></div>
         ${NET.on ? `<div class="opt-group"><div class="cap">Tu nombre</div><div class="row" style="justify-content:center"><input class="field" id="netName" maxlength="14" placeholder="Cómo te verán los demás" value="${(NET.name || '').replace(/"/g, '&quot;')}" style="width:200px"><button class="btn" data-netrename>Cambiar</button></div></div>` : ''}
         ${hosting ? `<div class="opt-group"><div class="cap">Código de la partida</div><div class="code">${NET.code}</div><p class="hint">Compártelo con tus amigos. ${NET.status || 'Esperando a que se unan…'}</p>
@@ -5015,14 +5104,15 @@ const App = (() => {
             <label class="flabel">Tu nombre<input class="field" id="netNameJoin" maxlength="14" placeholder="Cómo te verán los demás" value="${(NET.name || '').replace(/"/g, '&quot;')}"></label>
             <label class="flabel">Código de la partida<div class="row" style="justify-content:flex-start;margin-top:4px"><input class="field code-in" id="netCode" maxlength="5" placeholder="CÓDIGO" style="text-transform:uppercase" value="${NET.code || ''}"><button class="btn primary" data-netjoin>Unirse</button></div></label>
             ${NET.status ? `<p class="hint">${NET.status}</p>` : ''}</div>
-          <p class="hint" style="text-align:left">Requisitos: internet para el apretón de manos (servidor público de PeerJS) y que la red permita WebRTC; si no hay camino directo se usa un relé público (más lento). Abre el juego descargado en el navegador o instalado como app: la vista previa de archivos dentro de otras aplicaciones no suele permitir estas conexiones. Si el anfitrión cierra la pestaña, la partida termina.</p>`}`;
+          ${srv ? `<details class="modeinfo"><summary>Dirección del servidor</summary><div class="row" style="justify-content:flex-start;margin-top:6px"><input class="field" id="srvUrl" value="${srvUrl().replace(/"/g, '&quot;')}" style="flex:1;min-width:0"><button class="btn small" data-srvsave>Guardar</button></div><p class="hint" style="text-align:left">Servidor propio en Cloudflare (plan gratuito). Déjalo como está salvo que uses otro.</p></details>
+          <p class="hint" style="text-align:left">La sala se guarda en el servidor hasta 36 h sin actividad; cualquiera puede volver a entrar con el código y recupera su asiento. Si el anfitrión se va, el servidor nombra a otro jugador conectado.</p>` : `<p class="hint" style="text-align:left">Requisitos: internet para el apretón de manos (servidor público de PeerJS) y que la red permita WebRTC; si no hay camino directo se usa un relé público (más lento). Abre el juego desde la dirección web o la app instalada, no desde un visor incrustado. Si el anfitrión cierra la pestaña, la partida termina.</p>`}`}`;
     } else {
       m.innerHTML = `<button class="back" data-go="main">‹ Menú</button>
         <h2>Multijugador</h2><p class="hint" style="text-align:left">Elige cómo quieres jugar con otras personas.</p>
         <div class="flourish"></div>
         <nav class="mnav">
           <button class="mitem" data-go="p2p"><span class="crest trio">${crest(1)}${crest(2)}</span><span><b>Entre amigos (P2P)</b><i>Un código, sin servidor. Versión de prueba.</i></span><span class="chev">›</span></button>
-          <div class="mitem" aria-disabled="true"><span class="crest">${crest(3)}</span><span><b>Servidor</b><i>Partidas persistentes, ranking y turnos a distancia</i></span><span class="soon">Próximamente</span></div>
+          <button class="mitem" data-go="srv"><span class="crest">${crest(3)}</span><span><b>Servidor</b><i>Salas que no dependen del anfitrión: la partida sigue aunque alguien cierre</i></span><span class="chev">›</span></button>
         </nav>`;
     }
     m.scrollTop = keep; menuView = view;
@@ -5041,10 +5131,13 @@ const App = (() => {
     if (d.go) { delArm = false; return showMenu(d.go); }
     if ('load' in d) { loadGame(); return; }
     if ('install' in d) { pwaInstall(); return; }
+    if (d.srvback) { srvJoin(d.srvback); return; }
+    if ('srvsave' in d) { const u = $('#srvUrl'); try { localStorage.setItem('hexaria.server', (u && u.value.trim()) || ''); } catch (e) {} toast('Dirección guardada'); return; }
+    if ('nethost' in d && menuView === 'srv') { srvCreate(); return; }
     if ('nethost' in d) { const nm = $('#netNameHost'); saveName((nm && nm.value.trim()) || 'Anfitrión'); netHost().then(() => showMenu('p2p')).catch(e => { netSetStatus(e.message); }); return; }
-    if ('netjoin' in d) { const nm = $('#netNameJoin'), cd = $('#netCode'); if (!nm || !nm.value.trim()) { toast('Escribe tu nombre.'); nm && nm.focus(); return; } saveName(nm.value.trim()); if (!cd || cd.value.trim().length < 5) { toast('Escribe el código de 5 caracteres.'); cd && cd.focus(); return; } netJoin(cd.value).then(() => showMenu('p2p')).catch(e => { netSetStatus(e.message); }); return; }
+    if ('netjoin' in d) { const nm = $('#netNameJoin'), cd = $('#netCode'); if (!nm || !nm.value.trim()) { toast('Escribe tu nombre.'); nm && nm.focus(); return; } saveName(nm.value.trim()); if (!cd || cd.value.trim().length < 5) { toast('Escribe el código de 5 caracteres.'); cd && cd.focus(); return; } if (menuView === 'srv') { srvJoin(cd.value); return; } netJoin(cd.value).then(() => showMenu('p2p')).catch(e => { netSetStatus(e.message); }); return; }
     if ('netrename' in d) { const nm = $('#netName'); const name = (nm && nm.value.trim().slice(0, 14)); if (!name) { toast('Escribe un nombre.'); return; } saveName(name); netRename(name); return; }
-    if ('netleave' in d) { netLeave(); return showMenu('p2p'); }
+    if ('netleave' in d) { const v = menuView === 'srv' ? 'srv' : 'p2p'; try { sessionStorage.removeItem('hexaria.net'); } catch (e) {} netLeave(); return showMenu(v); }
     if ('netstart' in d) { netStart(); return; }
     if (d.theme) {
       if (d.theme !== cfg.theme) {
