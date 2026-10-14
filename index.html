@@ -4593,7 +4593,7 @@ const App = (() => {
      ===================================================================== */
   let NET_SAVED_NAME = '';
   try { NET_SAVED_NAME = localStorage.getItem('hexaria.name') || ''; } catch (e) {}
-  const NET = { on: false, host: false, peer: null, conns: {}, hostConn: null, mySeat: 0, code: '', name: NET_SAVED_NAME, lobby: [], applying: false, next: null, asks: {}, askN: 0, origin: {}, status: '', startAck: {}, startMsg: null, startTimer: null, loopActive: false, seated: false, lastMsg: 0, probe: 0, retries: 0, mode: 'p2p', ws: null };
+  const NET = { on: false, host: false, peer: null, conns: {}, hostConn: null, mySeat: 0, code: '', name: NET_SAVED_NAME, lobby: [], applying: false, next: null, asks: {}, askN: 0, origin: {}, status: '', startAck: {}, startMsg: null, startTimer: null, loopActive: false, seq: 0, seated: false, lastMsg: 0, probe: 0, retries: 0, mode: 'p2p', ws: null };
   const saveName = n => { NET.name = n; try { localStorage.setItem('hexaria.name', n); } catch (e) {} };
   const QR_LIB = 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js';
   const PEER_LIB = 'https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js';
@@ -4623,6 +4623,7 @@ const App = (() => {
   // ¿Me toca actuar a mí? Mi asiento, o un bot si soy el anfitrión
   function netActor() {
     if (!G) return false;
+    if (NET.mode === 'srv' && (!NET.ws || NET.ws.readyState !== 1)) return false;   // sin enlace con el servidor nadie actúa: se espera a reanudar
     const seat = G.phase === 'setup' ? G.setupOrder[G.setupIdx] : G.cur;
     return isLocalSeat(seat) || (G.players[seat].isBot && NET.host);
   }
@@ -4634,7 +4635,7 @@ const App = (() => {
     if (NET.host) hostNotifyClose();
     if (NET.peer) { try { NET.peer.destroy(); } catch (e) {} }
     clearInterval(NET.startTimer); NET.startAck = {}; NET.startMsg = null;
-    Object.assign(NET, { on: false, host: false, peer: null, conns: {}, hostConn: null, mySeat: 0, code: '', lobby: [], applying: false, next: null, asks: {}, origin: {}, status: '', seated: false, lastMsg: 0, probe: 0, retries: 0, mode: 'p2p', ws: null });
+    Object.assign(NET, { on: false, host: false, peer: null, conns: {}, hostConn: null, mySeat: 0, code: '', lobby: [], applying: false, next: null, asks: {}, origin: {}, status: '', seated: false, lastMsg: 0, probe: 0, retries: 0, mode: 'p2p', ws: null, seq: 0 });
   }
   async function netHost() {
     await netLoadLib();
@@ -4791,12 +4792,14 @@ const App = (() => {
     if (View.robberAt() !== G.board.robber) View.placeRobber(G.board.robber, false);
     View.setRaids(G.barb ? G.barb.raided : []);
   }
+  // Vuelca un estado recibido sobre el objeto G actual (misma identidad: las acciones en curso no se abortan)
+  function adoptState(data) { const g = Core.restore(data); if (!G) { G = g; return; } for (const k of Object.keys(G)) delete G[k]; Object.assign(G, g); }
   // Aplica un estado recibido y reproduce sus animaciones
   async function netApply(msg) {
     if (!G) return;
     NET.applying = true;
     try {
-      G = Core.restore(msg.G);
+      adoptState(msg.G);
       if (G.players[HUMAN] && G.players[HUMAN].isBot && G.phase !== 'over') G.players[HUMAN].isBot = false;
       if (msg.note) log(msg.note, 'sys warn');
       if (msg.ev && msg.ev.length) await playEvents(msg.ev);
@@ -4809,21 +4812,29 @@ const App = (() => {
   // Preguntas a un jugador concreto (oferta de comercio, descarte): en local abre su diálogo; si es remoto viaja por la red
   function ask(seat, kind, payload) {
     if (!NET.on || isLocalSeat(seat)) return netAnswer({ kind, payload, to: seat });
+    if (NET.mode === 'srv' && (!NET.ws || NET.ws.readyState !== 1)) return Promise.resolve(null);   // sin enlace no se puede preguntar
     return new Promise(res => {
       const id = NET.mySeat + ':' + (++NET.askN);
       NET.asks[id] = res; netEmit({ t: 'ask', id, to: seat, kind, payload, from: NET.mySeat });
-      setTimeout(() => { if (NET.asks[id]) { delete NET.asks[id]; res(null); } }, 45000);
+      setTimeout(() => { if (NET.asks[id]) { delete NET.asks[id]; res(null); } }, 30000);
     });
   }
   function netResolve(msg) { const f = NET.asks[msg.id]; if (f) { delete NET.asks[msg.id]; f(msg.result); } }
+  // Si el diálogo no se contesta a tiempo (el que pregunta deja de esperar a los 45 s), se cierra solo con una respuesta automática
+  const ASK_WAIT = 25000;
+  function askTimed(dialog, fallback) {
+    let timer; const t = new Promise(res => { timer = setTimeout(() => { closeModal(); toast('Se agotó el tiempo; se ha contestado por ti.', 3500); res(fallback()); }, ASK_WAIT); });
+    return Promise.race([dialog.then(r => { clearTimeout(timer); return r; }), t]);
+  }
   async function netAnswer(msg) {
     const p = msg.payload;
+    if (!NET.on || !G) return null;
     if (msg.kind === 'offer') {
-      const r = await offerDialog(p.from, p.give, p.get);
-      if (r === 'counter') { const c = await counterDialog(p.from, p.give, p.get); return { r: c ? 'counter' : 'no', c }; }
+      const r = await askTimed(offerDialog(p.from, p.give, p.get), () => 'no');
+      if (r === 'counter') { const c = await askTimed(counterDialog(p.from, p.give, p.get), () => null); return { r: c ? 'counter' : 'no', c }; }
       return { r };
     }
-    if (msg.kind === 'discard') return await discardDialog(p.n);
+    if (msg.kind === 'discard') return await askTimed(discardDialog(p.n), () => Core.aiDiscard(G, HUMAN, p.n));
     return null;
   }
   // El anfitrión arranca: reparte asientos, nombres y el estado inicial
@@ -4864,7 +4875,7 @@ const App = (() => {
     try {
       if (msg.theme !== cfg.theme) applyTheme(msg.theme);
       HUMAN = NET.mySeat;
-      G = Core.restore(msg.G);
+      adoptState(msg.G);
       if (G.players[HUMAN] && G.players[HUMAN].isBot && G.phase !== 'over') { G.players[HUMAN].isBot = false; if (NET.host) netEmit({ t: 'sync', G: snap(), ev: [], note: `${G.players[HUMAN].name} ha vuelto a la partida.` }); }
       View.clearTargets(); closeModal(); setBanner(null); busy = false;
       View.buildBoard(G.board, G.players); reconcilePieces(); renderHUD();
@@ -4888,17 +4899,25 @@ const App = (() => {
         setBanner(`${G.phase === 'setup' ? 'Colocación de' : 'Turno de'} ${who(seat)}…`); renderHUD(); hostNotify();
         await waitNext(); continue;
       }
-      if (G.phase === 'setup') {
-        await setupStep(G.setupIdx);
-        G.setupIdx++;
-        if (G.setupIdx >= G.setupOrder.length) { G.phase = 'main'; G.turn = 1; G.cur = G.first; log('Termina la colocación. Empieza la partida.', 'sys'); }
-        else G.cur = G.setupOrder[G.setupIdx];
-      } else {
-        if (!G.rolled && !G.devPlayed) { /* turno recién empezado */ }
-        if (G.players[G.cur].isBot) await botTurn(); else await humanTurn();
-        if (G.stats && G.cur === (G.first + G.players.length - 1) % G.players.length) G.stats.hist.push(G.players.map(x => Core.points(G, x.id, true)));
-        if (G.phase === 'main') { G.cur = (G.cur + 1) % G.players.length; G.turn++; G.rolled = false; G.devPlayed = false; }
+      const seatBefore = G.phase === 'setup' ? G.setupOrder[G.setupIdx] : G.cur, botBefore = !!G.players[seatBefore].isBot;
+      try {
+        if (G.phase === 'setup') {
+          await setupStep(G.setupIdx);
+          G.setupIdx++;
+          if (G.setupIdx >= G.setupOrder.length) { G.phase = 'main'; G.turn = 1; G.cur = G.first; log('Termina la colocación. Empieza la partida.', 'sys'); }
+          else G.cur = G.setupOrder[G.setupIdx];
+        } else {
+          if (G.players[G.cur].isBot) await botTurn(); else await humanTurn();
+          if (G.stats && G.cur === (G.first + G.players.length - 1) % G.players.length) G.stats.hist.push(G.players.map(x => Core.points(G, x.id, true)));
+          if (G.phase === 'main') { G.cur = (G.cur + 1) % G.players.length; G.turn++; G.rolled = false; G.devPlayed = false; }
+        }
+      } catch (e) {
+        if (!G) break;
+        if (e !== ABORT) { console.error(e); reportToLog(e); log('Un turno falló; la partida continúa.', 'sys warn'); }
+        busy = false; endTurn = null; View.clearTargets(); closeModal();
+        await sleep(400); continue;
       }
+      if (NET.mode === 'srv' && botBefore && !NET.host) { renderHUD(); continue; }   // jugué por la máquina sin ser ya anfitrión: no vale, el estado bueno llegará del servidor
       netEmit({ t: 'next', G: snap() });
       renderHUD(); hostNotify();
     }
@@ -4924,7 +4943,7 @@ const App = (() => {
   // Sala en curso recordada entre sesiones: código, asiento y nombre
   const netSaved = () => { try { const sv = JSON.parse(localStorage.getItem('hexaria.net') || 'null'); return sv && sv.mode === 'srv' && sv.code ? sv : null; } catch (e) { return null; } };
   const netForget = () => { try { localStorage.removeItem('hexaria.net'); } catch (e) {} };
-  const APP_VERSION = '47';
+  const APP_VERSION = '48';
   const SRV_DEFAULT = 'https://hexaria-server.leonardoxabi.workers.dev';
   const srvUrl = () => { let u = ''; try { u = localStorage.getItem('hexaria.server') || ''; } catch (e) {} return (u || SRV_DEFAULT).replace(/\/+$/, ''); };
   const srvCfg = () => ({ players: cfg.players, mode: cfg.mode, difficulty: cfg.difficulty, vp: cfg.vp, theme: cfg.theme });
@@ -4954,7 +4973,7 @@ const App = (() => {
     ws.onerror = () => {};
     ws.onclose = e => {
       if (!NET.on || NET.ws !== ws) return;
-      clearTimeout(netTimer);
+      clearTimeout(netTimer); NET.host = false;
       if (e.code === 4000) { toast('Has entrado en la sala desde otro sitio; esta sesión se cierra.', 4000); netLeave(); showMenu(G ? 'main' : 'srv', !!G); return; }
       NET.retries = (NET.retries || 0) + 1;
       if (NET.retries <= 8) { if (!G) netSetStatus('Conexión perdida; reconectando…'); setTimeout(() => { if (NET.on && NET.ws === ws) srvOpen(NET.code, { keep: true }); }, 1500 * Math.min(NET.retries, 4)); return; }
@@ -4963,7 +4982,7 @@ const App = (() => {
   }
   // Un asiento humano se queda sin jugador (lo lleva la máquina hasta que vuelva) o vuelve a ocuparse
   function seatToBot(seat, name) {
-    if (!G || G.phase === 'over' || !NET.host) return;
+    if (!G || G.phase === 'over' || !NET.host || seat === NET.mySeat) return;
     if (G.players[seat].isBot) return;
     G.players[seat].isBot = true; log(`${who(seat)} se ha desconectado; a partir de ahora juega la máquina por él.`, 'sys warn');
     netEmit({ t: 'sync', G: snap(), ev: [], note: `${G.players[seat].name} se ha desconectado; juega la máquina por él.` });
@@ -4976,7 +4995,8 @@ const App = (() => {
     netEmit({ t: 'sync', G: snap(), ev: [], note: `${G.players[seat].name} ha vuelto a la partida.` });
   }
   async function srvHandle(msg, srv) {
-    if (msg.t === 'pong') return;
+    if (msg.t === 'ack') { if (msg.seq > (NET.seq || 0)) NET.seq = msg.seq; return; }
+    if (msg.t === 'pong') { if (G && msg.seq > (NET.seq || 0) && !NET.applying && !netActor()) srv.send({ t: 'state' }); return; }
     if (msg.t === 'full') { netSetStatus(msg.reason || 'La sala está completa.'); const sv = netSaved(); if (sv && sv.code === NET.code) netForget(); NET.on = false; if (isNetView()) showMenu(menuView); return; }
     if (msg.t === 'seat') { NET.mySeat = msg.seat; NET.seated = true; NET.retries = 0; try { localStorage.setItem('hexaria.net', JSON.stringify({ code: NET.code, seat: msg.seat, name: NET.name, mode: 'srv', at: Date.now() })); } catch (e) {} if (!G) netSetStatus('En la sala. Esperando a que empiece la partida…'); return; }
     if (msg.t === 'lobby') {
@@ -4994,8 +5014,8 @@ const App = (() => {
       }
       return;
     }
-    if (msg.t === 'start') { if (!G) startNetGame(msg); else if (msg.resume) netResume(msg); return; }
-    if (msg.t === 'sync' || msg.t === 'next') { netQueue(msg); return; }
+    if (msg.t === 'start') { if (msg.seq != null) NET.seq = msg.seq; if (!G) startNetGame(msg); else if (msg.resume) netResume(msg); return; }
+    if (msg.t === 'sync' || msg.t === 'next') { if (msg.seq != null) { if (msg.seq < (NET.seq || 0)) return; NET.seq = msg.seq; } netQueue(msg); return; }
     if (msg.t === 'ask') { if (!isLocalSeat(msg.to)) return; const result = await netAnswer(msg); srv.send({ t: 'reply', id: msg.id, result }); return; }
     if (msg.t === 'reply') { netResolve(msg); return; }
     if (msg.t === 'left') { seatToBot(msg.seat, msg.name); return; }

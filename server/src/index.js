@@ -38,7 +38,7 @@ export class Room {
     this.state = state; this.env = env;
     this.origin = new Map();                                        // id de pregunta → socket que la hizo
     this.state.blockConcurrencyWhile(async () => {
-      this.data = (await this.state.storage.get('data')) || { lobby: [], cfg: null, G: null, theme: null, names: null, created: Date.now(), touched: Date.now(), exists: false };
+      this.data = (await this.state.storage.get('data')) || { lobby: [], cfg: null, G: null, theme: null, names: null, created: Date.now(), touched: Date.now(), exists: false, seq: 0 };
     });
   }
   async save() { this.data.touched = Date.now(); await this.state.storage.put('data', this.data); await this.state.storage.setAlarm(Date.now() + TTL); }
@@ -64,12 +64,12 @@ export class Room {
   bySeat(seat) { return this.sockets().find(ws => this.att(ws).seat === seat); }
   hostSeat() { const seats = this.sockets().map(ws => this.att(ws).seat).filter(s => s !== null); return seats.length ? Math.min(...seats) : null; }
   lobbyMsg() { return { t: 'lobby', players: this.data.lobby.map(l => ({ name: l.name, seat: l.seat, online: !!this.bySeat(l.seat) })), cfg: this.data.cfg }; }
-  announceHost() { const h = this.hostSeat(); if (h !== this.lastHost) { this.lastHost = h; this.broadcast({ t: 'host', seat: h }); } }
+  announceHost() { const h = this.hostSeat(); this.lastHost = h; this.broadcast({ t: 'host', seat: h }); }   // siempre se reparte: es idempotente y evita que alguien se quede con un anfitrión antiguo
 
   async webSocketMessage(ws, raw) {
     let msg; try { msg = JSON.parse(raw); } catch (e) { return; }
     const a = this.att(ws);
-    if (msg.t === 'ping') { this.send(ws, { t: 'pong' }); return; }
+    if (msg.t === 'ping') { this.send(ws, { t: 'pong', seq: this.data.seq || 0, started: !!this.data.G }); return; }
     if (msg.t === 'hello') {
       const name = String(msg.name || 'Invitado').slice(0, 14);
       if (!this.data.exists && !msg.cfg) { this.send(ws, { t: 'full', reason: 'Esa sala no existe o ha caducado.' }); return; }
@@ -93,14 +93,14 @@ export class Room {
         seat = [0, 1, 2, 3].find(s => !this.data.lobby.some(l => l.seat === s));
         this.data.lobby.push({ seat, name });
       }
-      const prev = this.bySeat(seat); if (prev && prev !== ws) { try { prev.close(4000, 'Sesión sustituida'); } catch (e) {} }
+      const prev = this.bySeat(seat); if (prev && prev !== ws) { this.setAtt(prev, { ...this.att(prev), seat: null }); try { prev.close(4000, 'Sesión sustituida'); } catch (e) {} }   // el socket viejo deja de contar antes de cerrarse
       this.setAtt(ws, { ...a, seat, name });
       await this.save();
       this.send(ws, { t: 'seat', seat, code: this.data.code });
       this.broadcast(this.lobbyMsg());
       this.lastHost = undefined; this.announceHost();
       if (this.data.G) {
-        this.send(ws, { t: 'start', G: this.data.G, theme: this.data.theme, names: this.data.names, resume: true });
+        this.send(ws, { t: 'start', G: this.data.G, theme: this.data.theme, names: this.data.names, resume: true, seq: this.data.seq || 0 });
         const h = this.hostSeat(); const hws = h !== null ? this.bySeat(h) : null;
         if (hws && hws !== ws) this.send(hws, { t: 'back', seat, name });
       }
@@ -109,8 +109,15 @@ export class Room {
     if (a.seat === null) return;                                      // sin asiento no se hace nada más
     if (msg.t === 'rename') { const l = this.data.lobby.find(x => x.seat === a.seat); if (l && !this.data.G) { l.name = String(msg.name || '').slice(0, 14) || l.name; this.setAtt(ws, { ...a, name: l.name }); await this.save(); this.broadcast(this.lobbyMsg()); } return; }
     if (msg.t === 'cfg') { if (a.seat === this.hostSeat() && !this.data.G && msg.cfg) { this.data.cfg = { ...this.data.cfg, ...msg.cfg }; await this.save(); this.broadcast(this.lobbyMsg()); } return; }
-    if (msg.t === 'start') { if (a.seat !== this.hostSeat() || !msg.G) return; this.data.G = msg.G; this.data.theme = msg.theme; this.data.names = msg.names; await this.save(); this.broadcast({ ...msg }, ws); return; }
-    if (msg.t === 'sync' || msg.t === 'next') { if (msg.G) { this.data.G = msg.G; await this.save(); } this.broadcast(msg, ws); return; }
+    if (msg.t === 'start') { if (a.seat !== this.hostSeat() || !msg.G) return; this.data.G = msg.G; this.data.theme = msg.theme; this.data.names = msg.names; this.data.seq = (this.data.seq || 0) + 1; await this.save(); this.broadcast({ ...msg, seq: this.data.seq }, ws); return; }
+    if (msg.t === 'state') { if (this.data.G) this.send(ws, { t: 'next', G: this.data.G, ev: [], seq: this.data.seq || 0 }); return; }
+    if (msg.t === 'sync' || msg.t === 'next') {
+      // Solo manda estado el anfitrión o el jugador humano al que le toca; así dos anfitriones transitorios no se pisan
+      const cur = this.data.G ? (this.data.G.phase === 'setup' ? this.data.G.setupOrder[this.data.G.setupIdx] : this.data.G.cur) : null;
+      const mine = this.data.G && cur === a.seat && this.data.G.players[a.seat] && !this.data.G.players[a.seat].isBot;
+      if (a.seat !== this.hostSeat() && !mine) { if (this.data.G) this.send(ws, { t: 'next', G: this.data.G, ev: [], seq: this.data.seq || 0 }); return; }
+      if (msg.G) { this.data.G = msg.G; this.data.seq = (this.data.seq || 0) + 1; await this.save(); } this.broadcast({ ...msg, seq: this.data.seq }, ws); this.send(ws, { t: 'ack', seq: this.data.seq }); return;
+    }
     if (msg.t === 'ask') { const to = this.bySeat(msg.to); if (to) { this.origin.set(msg.id, ws); this.send(to, msg); } else this.send(ws, { t: 'reply', id: msg.id, result: null }); return; }
     if (msg.t === 'reply') { const o = this.origin.get(msg.id); if (o) { this.origin.delete(msg.id); this.send(o, msg); } return; }
     if (msg.t === 'leave') { if (!this.data.G) { this.data.lobby = this.data.lobby.filter(l => l.seat !== a.seat); await this.save(); } this.setAtt(ws, { ...a, seat: null }); try { ws.close(1000, 'bye'); } catch (e) {} this.broadcast(this.lobbyMsg()); this.announceHost(); return; }
@@ -121,6 +128,7 @@ export class Room {
   gone(ws) {
     const a = this.att(ws); if (a.seat === null) return;
     this.setAtt(ws, { ...a, seat: null });
+    if (this.bySeat(a.seat)) { this.announceHost(); return; }                     // otro socket ya ocupa ese asiento: no es una baja
     if (!this.data.G) { this.data.lobby = this.data.lobby.filter(l => l.seat !== a.seat); this.save(); }
     this.broadcast(this.lobbyMsg());
     this.announceHost();
