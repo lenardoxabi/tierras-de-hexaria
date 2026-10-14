@@ -407,6 +407,20 @@ body.in-menu #vignette{background:linear-gradient(90deg,rgba(14,8,3,.55),transpa
   body.in-menu #vignette{background:linear-gradient(180deg,transparent 20%,rgba(14,8,3,.6) 36%)}
   .mitem{padding:13px 2px}
   .mitem b{font-size:20px}
+  /* menú principal en fichas: dos grandes para jugar y dos pequeñas para ajustes y reglas */
+  #menu.home{grid-template-rows:42vh 1fr}
+  .mpanel.home{padding-top:14px}
+  .home .mnav{display:flex;flex-direction:column;gap:10px;margin-top:auto}
+  .home .mitem{border:1px solid rgba(92,62,32,.45);border-radius:6px;padding:16px 14px;background:linear-gradient(180deg,rgba(255,250,238,.55),rgba(235,220,185,.35));box-shadow:0 1px 2px rgba(60,35,10,.15),inset 0 0 0 1px rgba(255,250,238,.6)}
+  .home .mitem:first-child{border-top:1px solid rgba(92,62,32,.45)}
+  .home .mitem .crest{width:56px}
+  .home .mitem .crest svg{width:46px;height:50px}
+  .home .mitem .crest.trio svg{width:30px;height:33px;margin:0 -7px}
+  .home .mitem b{font-size:22px}
+  .home .mitem i{font-size:14.5px}
+  .home .mlinks{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;margin-bottom:auto}
+  .home .mlinks .btn{padding:12px 8px;font-size:15px;border-radius:6px;background:linear-gradient(180deg,rgba(255,250,238,.5),rgba(235,220,185,.3))}
+  .home .mfoot{padding-top:14px;margin-top:0}
 }
 @media (prefers-reduced-motion: reduce){ *{transition:none!important;animation:none!important} }
 /* ---------- Pompaelo: pergamino medieval con el verde y el oro de la ciudad ---------- */
@@ -4881,7 +4895,7 @@ const App = (() => {
   // Sala en curso recordada entre sesiones: código, asiento y nombre
   const netSaved = () => { try { const sv = JSON.parse(localStorage.getItem('hexaria.net') || 'null'); return sv && sv.mode === 'srv' && sv.code ? sv : null; } catch (e) { return null; } };
   const netForget = () => { try { localStorage.removeItem('hexaria.net'); } catch (e) {} };
-  const APP_VERSION = '43';
+  const APP_VERSION = '44';
   const SRV_DEFAULT = 'https://hexaria-server.leonardoxabi.workers.dev';
   const srvUrl = () => { let u = ''; try { u = localStorage.getItem('hexaria.server') || ''; } catch (e) {} return (u || SRV_DEFAULT).replace(/\/+$/, ''); };
   const srvCfg = () => ({ players: cfg.players, mode: cfg.mode, difficulty: cfg.difficulty, vp: cfg.vp, theme: cfg.theme });
@@ -5037,6 +5051,9 @@ const App = (() => {
     const m = $('#menuSheet'), defs = Core.PLAYER_DEFS;
     const keep = !wasHidden && view === menuView ? m.scrollTop : 0;   // al cambiar una opción no se mueve la página
     const crest = i => View.armsSVG(i, defs[i].color);
+    const homeWas = $('#menu').classList.contains('home');
+    m.classList.toggle('home', view === 'main'); $('#menu').classList.toggle('home', view === 'main');
+    const homeChanged = homeWas !== (view === 'main');
     if (view === 'main') {
       const themeName = { medieval: 'Medieval', future: 'Futurista', pompaelo: 'Pompaelo' }[cfg.theme] || '';
       m.innerHTML = `<header class="mhead"><span class="crest">${crest(0)}</span><h1>${Lx.title}</h1><p>${Lx.sub}</p></header>
@@ -5147,7 +5164,7 @@ const App = (() => {
     }
     m.scrollTop = keep; menuView = view;
     $('#menu').hidden = false;
-    if (wasHidden || fresh) View.setAttract(true, menuLayout());   // la cámara solo se recoloca al entrar al menú
+    if (wasHidden || fresh || homeChanged) View.setAttract(true, menuLayout());   // la cámara solo se recoloca al entrar al menú
   }
   // Desplaza el centro de la vista 3D al hueco que deja el pergamino
   function menuLayout() {
